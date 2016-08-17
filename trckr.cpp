@@ -12,6 +12,14 @@ using namespace Eigen;
 //lidar_tracker::centroids track;
 lidar_tracker::centroids predicted;
 
+			visualization_msgs::Marker marker;
+			marker.header.frame_id = "velodyne";
+			marker.header.stamp = ros::Time();
+			marker.ns = "my_namespace";
+			marker.id = 0;
+			marker.type = visualization_msgs::Marker::SPHERE;
+			marker.action = visualization_msgs::Marker::ADD;
+
 struct track
 {
     float x, y, mean_x, mean_y, vel_x, vel_y, var_x, var_y; // track at time t
@@ -21,7 +29,7 @@ struct track
     float v_x, v_y; // measurements residual
 };
 vector < track > tracks;
-vector < track > MAP;
+
 
 // Constant Matrix
 
@@ -118,9 +126,22 @@ void chatterCallback(const lidar_tracker::centroidsConstPtr& input)
             }            
                 X_pred = F*X + u;
                 Z_pred = H*X_pred + v;
+                // filtering of tracks
+                for(std::vector<int>::size_type j = 0; j != tracks.size(); j++)
+                       {
+                           float beta_x = exp(-(pow((input->points[i].x - tracks[j].mean_x),2))/tracks[j].var_x);
+                           float beta_y = exp(-(pow((input->points[i].y - tracks[j].mean_y),2))/tracks[j].var_y);
+                       	   
+                       	   if(beta_x < 0.1 && beta_y < 0.1)
+                       	   {
+                       	   		tracks.erase(j);
+                       	   }
+                       }
+
+
                 // MAP
-               
-               
+                
+                float beta = 0.1;  
                 vector < float > map_x;
                 vector < float > map_y;
                 map_y.resize(tracks.size());
@@ -137,12 +158,19 @@ void chatterCallback(const lidar_tracker::centroidsConstPtr& input)
                        int k_x = distance(map_x.begin(), index_x);
                        auto index_y = max_element(map_y.begin(), map_y.end());
                        int k_y = distance(map_y.begin(), index_y);
-                       if(k_x == k_y)
+                       if(k_x == k_y && map_y>beta && map_x>beta)
                        {
                            tracks[k_x].z_x=input->points[i].x;
                            tracks[k_y].z_y=input->points[i].y;
 
-                    }               
+                    	}
+                    	else
+                    	{
+                    		track points;
+                    		points.x = input->points[i].x;
+                    		points.y = input->points[i].y;
+                    		tracks.pushback(points);
+                    	}               
                 }
                 r = Z - Z_pred;
                 X = X_pred + r;   
@@ -160,56 +188,44 @@ void chatterCallback(const lidar_tracker::centroidsConstPtr& input)
             cout<< tracks[i].mean_x << "  "<< tracks[i].mean_y<<"  "<<tracks[i].var_x<<"  "<<tracks[i].var_y << endl;
         }//update_mean&Variance;
   }
-
-     
+	
+	marker.points.resize(tracks.size());
+	marker.scale.x = 1;
+	marker.scale.y = 0.1;
+	marker.scale.z = 0.1;
+	int l;		
+  for(std::vector<int>::size_type i = 0; i != tracks.size(); i++)
+        {  
+          	
+			marker.points[i].x = tracks[i].x;
+			marker.points[i].y = tracks[i].y;
+			marker.points[i].z = 0.0;
+			
+			marker.color[i].a = 1.0; // Don't forget to set the alpha!
+			marker.color[i].r = l/(l+1);
+			marker.color[i].g = 1.0/(l+1);
+			marker.color[i].b = 0.0;
+			l=l+1;
+			  
+        }   
  
  
 }
 
 int main(int argc, char **argv)
 {
-  /**
-   * The ros::init() function needs to see argc and argv so that it can perform
-   * any ROS arguments and name remapping that were provided at the command line.
-   * For programmatic remappings you can use a different version of init() which takes
-   * remappings directly, but for most command-line programs, passing argc and argv is
-   * the easiest way to do it.  The third argument to init() is the name of the node.
-   *
-   * You must call one of the versions of ros::init() before using any other
-   * part of the ROS system.
-   */
+  
   ros::init(argc, argv, "listener");
-
-  /**
-   * NodeHandle is the main access point to communications with the ROS system.
-   * The first NodeHandle constructed will fully initialize this node, and the last
-   * NodeHandle destructed will close down the node.
-   */
   ros::NodeHandle n;
-
-  /**
-   * The subscribe() call is how you tell ROS that you want to receive messages
-   * on a given topic.  This invokes a call to the ROS
-   * master node, which keeps a registry of who is publishing and who
-   * is subscribing.  Messages are passed to a callback function, here
-   * called chatterCallback.  subscribe() returns a Subscriber object that you
-   * must hold on to until you want to unsubscribe.  When all copies of the Subscriber
-   * object go out of scope, this callback will automatically be unsubscribed from
-   * this topic.
-   *
-   * The second parameter to the subscribe() function is the size of the message
-   * queue.  If messages are arriving faster than they are being processed, this
-   * is the number of messages that will be buffered up before beginning to throw
-   * away the oldest ones.
-   */
   ros::Subscriber sub = n.subscribe("/cluster_centroids", 10, chatterCallback);
-
-  /**
-   * ros::spin() will enter a loop, pumping callbacks.  With this version, all
-   * callbacks will be called from within this thread (the main one).  ros::spin()
-   * will exit when Ctrl-C is pressed, or the node is shutdown by the master.
-   */
-  ros::spin();
-
+  ros::Publisher vis_pub = node_handle.advertise<visualization_msgs::Marker>( "visualization_marker", 10 );
+  while (nh.ok())
+  {
+    //msg->header.stamp = ros::Time::now().toNSec();
+    
+    vis_pub.publish (marker);
+    ros::spinOnce ();
+  }
+  //ros::spin();
   return 0;
 }
